@@ -123,6 +123,9 @@ class SiteSettings(BaseModel):
     pages = models.JSONField(default=dict)
     notice = models.JSONField(default=dict)
     brand = models.JSONField(default=dict)
+    # The public site menu, as arranged in the dashboard. Empty means the menu
+    # is built automatically from the category tree.
+    navigation = models.JSONField(default=list)
 
     class Meta:
         verbose_name = 'site settings'
@@ -145,6 +148,7 @@ class SiteSettings(BaseModel):
         'pages': 'pages',
         'notice': 'notice',
         'brand': 'brand',
+        'navigation': 'navigation',
     }
 
     def as_dict(self) -> dict:

@@ -1,9 +1,11 @@
 import copy
+import re
 
 from django.db import transaction
 from rest_framework import serializers
 
 from apps.accounts.auth import AdminView, PublicView
+from apps.catalog.models import Destination, TourCategory, TravelArea
 from apps.common.responses import send
 from apps.common.revalidate import revalidate
 from apps.common.validation import OptionalImageSchema, validate
@@ -132,6 +134,81 @@ class NoticeSchema(serializers.Serializer):
     text = serializers.CharField(max_length=200, required=False, allow_blank=True)
 
 
+def _validate_href(value: str) -> None:
+    """A path on this site or a full web, mail or phone link; never javascript: and the like."""
+    if value.startswith('/') and not value.startswith('//'):
+        return
+    if re.match(r'^(https?://|mailto:|tel:)\S+$', value):
+        return
+    raise serializers.ValidationError('Use a path on this site, such as /tours, or a full https:// address.')
+
+
+class NavImageSchema(serializers.Serializer):
+    url = serializers.CharField(max_length=500)
+    # Thumbnails sit beside the link text, which already names them, so they
+    # are decorative and alt text is optional here.
+    alt = serializers.CharField(max_length=300, required=False, allow_blank=True, default='')
+
+
+class NavLinkSchema(serializers.Serializer):
+    id = serializers.CharField(max_length=40)
+    label = serializers.CharField(max_length=40, error_messages={'blank': 'Every menu item needs a title.'})
+    href = serializers.CharField(max_length=200, validators=[_validate_href], error_messages={'blank': 'Every menu item needs a link.'})
+    visible = serializers.BooleanField(default=True)
+    image = NavImageSchema(required=False, allow_null=True)
+
+
+NAV_SOURCES = {
+    'category': TourCategory,
+    'area': TravelArea,
+    'destination': Destination,
+}
+
+
+class NavSourceSchema(serializers.Serializer):
+    """A live link to a catalogue record; the web app derives the route and dropdown from it."""
+
+    type = serializers.ChoiceField(choices=list(NAV_SOURCES))
+    slug = serializers.CharField(max_length=120)
+
+    def validate(self, attrs):
+        if not NAV_SOURCES[attrs['type']].objects.filter(slug=attrs['slug']).exists():
+            raise serializers.ValidationError({'slug': f'There is no {attrs["type"]} "{attrs["slug"]}".'})
+        return attrs
+
+
+class NavItemSchema(serializers.Serializer):
+    """
+    A top-level entry. Either a plain link (label + href + hand-made children)
+    or linked to a category, travel area or destination (`source`), in which
+    case a blank label inherits the record's name and the route and dropdown
+    are derived from the live catalogue when the menu is rendered.
+
+    Thumbnails belong to dropdown links only, so there is no image here.
+    """
+
+    id = serializers.CharField(max_length=40)
+    label = serializers.CharField(max_length=40, required=False, allow_blank=True, default='')
+    href = serializers.CharField(max_length=200, required=False, allow_blank=True, default='', validators=[_validate_href])
+    visible = serializers.BooleanField(default=True)
+    source = NavSourceSchema(required=False, allow_null=True, default=None)
+    # Linked items only: whether the derived dropdown (sub-categories, areas) is shown.
+    showChildren = serializers.BooleanField(default=True)
+    children = serializers.ListField(child=NavLinkSchema(), required=False, default=list, max_length=12)
+
+    def validate(self, attrs):
+        if attrs.get('source'):
+            return attrs
+        errors = {}
+        if not attrs.get('label', '').strip():
+            errors['label'] = 'Every menu item needs a title.'
+        if not attrs.get('href'):
+            errors['href'] = 'Every menu item needs a link.'
+        if errors:
+            raise serializers.ValidationError(errors)
+        return attrs
+
+
 class UpdateSettingsBody(serializers.Serializer):
     hero = HeroSchema(required=False)
     heroSlides = serializers.ListField(child=OptionalImageSchema(), required=False, max_length=12)
@@ -149,6 +226,8 @@ class UpdateSettingsBody(serializers.Serializer):
     home = serializers.DictField(required=False)
     pages = serializers.DictField(required=False)
     brand = serializers.DictField(required=False)
+    # Replaced whole on save; an empty list returns the site to the automatic menu.
+    navigation = serializers.ListField(child=NavItemSchema(), required=False, max_length=10)
 
 
 def _register_images(value) -> None:

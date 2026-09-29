@@ -21,7 +21,7 @@ from django.utils import timezone
 
 from apps.accounts.models import AdminUser, AuditLog, Role
 from apps.accounts.permissions_catalog import SYSTEM_ROLES
-from apps.catalog.models import Country, Destination, Place, Tour, TourCategory, TourImage
+from apps.catalog.models import Country, Destination, Place, Tour, TourCategory, TourImage, TravelArea
 from apps.content.defaults import SITE_SETTINGS_DEFAULTS
 from apps.content.models import BlogPost, Faq, Service, SiteSettings, Tag, Testimonial
 from apps.enquiries.models import Enquiry, EnquiryEvent, EnquiryReferenceCounter
@@ -52,6 +52,7 @@ class Command(BaseCommand):
             self._categories()
             self._destinations()
             self._tours(demo)
+            self._areas()
             self._services()
             self._faqs()
             self._settings(reset)
@@ -76,6 +77,8 @@ class Command(BaseCommand):
         Testimonial.objects.all().delete()
         TourImage.objects.all().delete()
         Tour.objects.all().delete()
+        TravelArea.objects.filter(parent__isnull=False).delete()
+        TravelArea.objects.all().delete()
         Place.objects.all().delete()
         Destination.objects.all().delete()
         TourCategory.objects.filter(parent__isnull=False).delete()
@@ -241,6 +244,38 @@ class Command(BaseCommand):
                 TourImage.objects.create(tour=tour, image=self._img(file), order=index)
             count += 1
         self.log(f'{count} tours')
+
+    def _areas(self):
+        note = 'Regional grouping for the homepage packages section.'
+        count = 0
+        for group_row in catalog_data.AREAS:
+            group, _ = TravelArea.objects.update_or_create(
+                slug=group_row['slug'],
+                defaults={'name': group_row['name'], 'parent': None, 'order': group_row['order'],
+                          'status': 'published', 'source_note': note},
+            )
+            for index, (slug, name) in enumerate(group_row['areas']):
+                details = catalog_data.AREA_DETAILS.get(slug, {})
+                area, _ = TravelArea.objects.update_or_create(
+                    slug=slug,
+                    defaults={
+                        'name': name, 'parent': group, 'order': index, 'status': 'published', 'source_note': note,
+                        'tag': details.get('tag', ''), 'description': details.get('description', ''),
+                        'image': self._img(details.get('image')),
+                    },
+                )
+                # Places are recreated with their destination on every run, so relink each time.
+                area.places.set(Place.objects.filter(destination__slug='kenya', name__in=details.get('places', [])))
+                count += 1
+
+        # Inverted so each tour's set is written once, and a re-run changes nothing.
+        by_tour: dict = {}
+        for slug, titles in catalog_data.AREA_TOURS.items():
+            for title in titles:
+                by_tour.setdefault(title, []).append(slug)
+        for tour in Tour.objects.filter(title__in=by_tour):
+            tour.areas.set(TravelArea.objects.filter(slug__in=by_tour[tour.title]))
+        self.log(f'{len(catalog_data.AREAS)} area groups, {count} areas')
 
     def _services(self):
         from apps.common.slugs import slugify

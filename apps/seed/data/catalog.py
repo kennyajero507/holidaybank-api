@@ -119,6 +119,9 @@ DESTINATIONS = [
             {'name': 'Diani Beach', 'kind': 'Beach', 'image': 'diani-beach-palms.jpg', 'best_time': 'December – March',
              'blurb': "White sand south of Mombasa, with reef snorkelling and dhow cruises.",
              'highlights': ['Reef snorkelling', 'Sunset dhow cruises', 'Colobus monkeys in the coastal forest']},
+            {'name': 'Watamu & Malindi', 'kind': 'Beach', 'image': 'kenya-coast-sunset.jpg', 'best_time': 'December – March',
+             'blurb': 'The coast north of Mombasa: Watamu Marine National Park and the Swahili old town of Malindi.',
+             'highlights': ['Watamu Marine National Park', 'Gede Ruins', 'Malindi old town']},
             {'name': 'Lake Naivasha', 'kind': 'Lake', 'image': 'naivasha-hippos-pelicans.jpg', 'best_time': 'Year-round',
              'blurb': 'A freshwater lake in the Rift Valley with hippos, pelicans and a walking safari on Crescent Island.',
              'highlights': ['Boat rides among hippos', 'Crescent Island walking safari', "Hell's Gate nearby"]},
@@ -816,3 +819,54 @@ TOURS = [
         ],
     },
 ]
+
+# Regional groupings for the homepage packages tabs, as specified by the
+# business. Independent of the categories above: a tour keeps its one product
+# line and can sit in several areas.
+AREAS = [
+    {'slug': 'kenyan', 'name': 'Kenyan', 'order': 1, 'areas': [
+        ('diani', 'Diani'), ('watamu-malindi', 'Watamu/Malindi'), ('maasai-mara', 'Maasai Mara'),
+        ('amboseli', 'Amboseli'), ('tsavo', 'Tsavo'),
+    ]},
+    {'slug': 'europe', 'name': 'Europe', 'order': 2, 'areas': [
+        ('germany', 'Germany'), ('spain', 'Spain'), ('france', 'France'), ('italy', 'Italy'),
+    ]},
+    {'slug': 'africa', 'name': 'Africa', 'order': 3, 'areas': [
+        ('south-africa', 'South Africa'), ('egypt', 'Egypt'), ('zanzibar', 'Zanzibar'), ('mauritius', 'Mauritius'),
+    ]},
+    {'slug': 'asia-middle-east', 'name': 'Asia & Middle East', 'order': 4, 'areas': [
+        ('thailand', 'Thailand'), ('malaysia', 'Malaysia'), ('singapore', 'Singapore'), ('dubai', 'Dubai'),
+    ]},
+]
+
+# What the homepage's "Where we go" portrait cards show for the Kenyan areas:
+# tag, teaser, card image, and the Kenya destination places each covers (by
+# name). Teasers restate the place blurbs above.
+AREA_DETAILS = {
+    'diani': {'tag': 'Locals / Kenya', 'image': 'diani-beach-palms.jpg', 'places': ['Diani Beach'],
+              'description': 'White sand south of Mombasa, with reef snorkelling and dhow cruises.'},
+    'watamu-malindi': {'tag': 'Locals / Kenya', 'image': 'kenya-coast-sunset.jpg', 'places': ['Watamu & Malindi'],
+                       'description': 'Marine-park snorkelling at Watamu and the Swahili old town of Malindi.'},
+    'maasai-mara': {'tag': 'Locals / Kenya', 'image': 'mara-wildebeest-migration.jpg', 'places': ['Maasai Mara'],
+                    'description': 'Big cats year-round, and the river crossings of the migration from July.'},
+    'amboseli': {'tag': 'Locals / Kenya', 'image': 'amboseli-elephant-kilimanjaro.jpg', 'places': ['Amboseli'],
+                 'description': 'Elephant herds with Kilimanjaro rising behind them on clear mornings.'},
+    'tsavo': {'tag': 'Locals / Kenya', 'image': 'tsavo-red-elephants.jpg', 'places': ['Tsavo East & West'],
+              'description': 'Red-dust elephants and the Mzima Springs hippo pools in Kenya’s largest park.'},
+}
+
+# Existing tours placed in the areas they actually visit (by title). Areas with
+# no tour yet stay empty rather than being filled with invented packages.
+AREA_TOURS = {
+    'diani': ['Diani Beach Escape'],
+    'maasai-mara': [
+        'Maasai Mara, 3 Days', 'Mara Balloon Safari Weekend', 'Mara–Serengeti Migration',
+        'East Africa Grand Safari', 'Safari & Zanzibar Beach',
+    ],
+    'amboseli': ['Amboseli & Kilimanjaro Views'],
+    'tsavo': ['Tsavo East & West'],
+    'france': ['Paris City Break', 'Grand European Tour'],
+    'italy': ['Rome, Florence & Venice', 'Florence & Tuscany Short Break', 'Grand European Tour'],
+    'spain': ['Barcelona & Madrid', 'Madrid & Toledo City Break'],
+    'zanzibar': ['Safari & Zanzibar Beach'],
+}

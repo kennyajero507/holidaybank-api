@@ -4,8 +4,8 @@ from apps.accounts.auth import PublicView
 from apps.common.exceptions import ApiError
 from apps.common.responses import send
 
-from .models import Country, Tour, TourCategory
-from .resources import category_shape, country_shape, tour_queryset, tour_shape
+from .models import Country, Tour, TourCategory, TravelArea
+from .resources import area_shape, category_shape, country_shape, tour_queryset, tour_shape
 
 
 class CategoryTreeView(PublicView):
@@ -32,6 +32,43 @@ class CategoryTreeView(PublicView):
 
         roots = sorted(by_parent.get(None, []), key=lambda c: (c.order, c.name))
         return send([build(root) for root in roots])
+
+
+class AreaTreeView(PublicView):
+    """
+    Published travel areas as a tree (Kenyan > Diani, Maasai Mara...), each
+    with how many published tours it holds. A tour can be in several areas of
+    one group, so a group counts distinct tours rather than summing children.
+    """
+
+    def get(self, request):
+        tours_by_area: dict = {}
+        links = Tour.areas.through.objects.filter(tour__status='published').values_list('travelarea_id', 'tour_id')
+        for area_id, tour_id in links:
+            tours_by_area.setdefault(area_id, set()).add(tour_id)
+
+        rows = list(
+            TravelArea.objects.filter(status='published')
+            .select_related('parent', 'image')
+            .annotate(place_count=Count('places', distinct=True))
+        )
+        by_parent: dict = {}
+        for row in rows:
+            by_parent.setdefault(row.parent_id, []).append(row)
+
+        def build(node) -> tuple[dict, set]:
+            tours = set(tours_by_area.get(node.id, ()))
+            children = []
+            for child in sorted(by_parent.get(node.id, []), key=lambda c: (c.order, c.name)):
+                shape, child_tours = build(child)
+                children.append(shape)
+                tours |= child_tours
+            shape = area_shape(node, children)
+            shape['tourCount'] = len(tours)
+            return shape, tours
+
+        roots = sorted(by_parent.get(None, []), key=lambda c: (c.order, c.name))
+        return send([build(root)[0] for root in roots])
 
 
 class CountryListView(PublicView):

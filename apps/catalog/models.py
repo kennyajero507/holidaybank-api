@@ -117,6 +117,45 @@ class Place(BaseModel):
         return f'{self.name} ({self.destination.name})'
 
 
+class TravelArea(PublishableModel):
+    """
+    Regional groupings for browsing, independent of product line:
+
+        Kenyan              > Diani, Watamu/Malindi, Maasai Mara, Amboseli, Tsavo
+        Europe              > Germany, Spain, France, Italy
+        Africa              > South Africa, Egypt, Zanzibar, Mauritius
+        Asia & Middle East  > Thailand, Malaysia, Singapore, Dubai
+
+    Unlike its single category, a tour can sit in several areas (a
+    Mara–Serengeti safari is in Maasai Mara). Filtering by a group includes
+    every area beneath it.
+    """
+
+    name = models.CharField(max_length=80)
+    slug = models.SlugField(max_length=80, unique=True)
+    parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.PROTECT, related_name='children')
+    # Short teaser for the homepage's portrait cards.
+    description = models.TextField(blank=True, default='')
+    # Small label above the card title, e.g. "Locals / Kenya".
+    tag = models.CharField(max_length=60, blank=True, default='')
+    image = models.ForeignKey(ImageAsset, null=True, blank=True, on_delete=models.PROTECT, related_name='+')
+    # The destination places (parks, beaches, towns) the area covers; counted on its card.
+    places = models.ManyToManyField('Place', related_name='areas', blank=True)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['order', 'name']
+
+    def __str__(self):
+        return f'{self.parent.name} › {self.name}' if self.parent_id else self.name
+
+    def descendant_ids(self) -> list:
+        ids = [self.id]
+        for child in self.children.all():
+            ids += child.descendant_ids()
+        return ids
+
+
 class Difficulty(models.TextChoices):
     EASY = 'easy', 'Easy'
     MODERATE = 'moderate', 'Moderate'
@@ -146,6 +185,7 @@ class Tour(PublishableModel):
 
     destination = models.ForeignKey(Destination, null=True, blank=True, on_delete=models.SET_NULL, related_name='tours')
     countries = models.ManyToManyField(Country, related_name='tours', blank=True)
+    areas = models.ManyToManyField(TravelArea, related_name='tours', blank=True)
     # The display line from the original cards, e.g. "Diani, Coast" or "4-Country Circuit".
     location_label = models.CharField(max_length=80, blank=True, default='')
 

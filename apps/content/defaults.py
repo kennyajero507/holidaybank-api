@@ -191,4 +191,7 @@ SITE_SETTINGS_DEFAULTS = {
     },
     # Footer notice on how prices are quoted.
     'notice': {'enabled': True, 'text': 'Prices are per person and subject to availability at the time of booking.'},
+    # Empty: the web app builds the menu from the category tree until an admin
+    # arranges one under Navigation menu.
+    'navigation': [],
 }

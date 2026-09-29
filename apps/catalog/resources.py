@@ -16,7 +16,18 @@ from apps.common.validation import (
 )
 from apps.media.services import image_shape, resolve_image
 
-from .models import CategoryKind, Country, Destination, Difficulty, Place, Region, Tour, TourCategory, TourImage
+from .models import (
+    CategoryKind,
+    Country,
+    Destination,
+    Difficulty,
+    Place,
+    Region,
+    Tour,
+    TourCategory,
+    TourImage,
+    TravelArea,
+)
 
 # ---------------------------------------------------------------------------
 # Countries
@@ -77,6 +88,45 @@ def category_shape(c: TourCategory, children: list | None = None) -> dict:
     if children is not None:
         shape['children'] = children
     return shape
+
+
+# ---------------------------------------------------------------------------
+# Travel areas (regional groupings)
+# ---------------------------------------------------------------------------
+
+
+def area_ref(a: TravelArea) -> dict:
+    group = a.parent if a.parent_id else None
+    return {'slug': a.slug, 'name': a.name, 'group': {'slug': group.slug, 'name': group.name} if group else None}
+
+
+def area_shape(a: TravelArea, children: list | None = None) -> dict:
+    shape = {
+        'id': str(a.id),
+        '_id': str(a.id),
+        'name': a.name,
+        'slug': a.slug,
+        'description': a.description,
+        'tag': a.tag,
+        'image': image_shape(a.image),
+        # Annotated by the tree view; counted directly elsewhere.
+        'placeCount': a.place_count if hasattr(a, 'place_count') else a.places.count(),
+        'parent': {'slug': a.parent.slug, 'name': a.parent.name} if a.parent_id else None,
+        'order': a.order,
+        'status': a.status,
+        'isSample': a.is_sample,
+    }
+    if children is not None:
+        shape['children'] = children
+    return shape
+
+
+def resolve_areas(slugs: list[str]) -> list[TravelArea]:
+    found = list(TravelArea.objects.filter(slug__in=slugs))
+    unknown = sorted(set(slugs) - {a.slug for a in found})
+    if unknown:
+        raise ApiError.unprocessable(details={'areas': f'Unknown area: {", ".join(unknown)}.'})
+    return found
 
 
 class CategorySchema(serializers.Serializer):
@@ -360,6 +410,7 @@ def tour_shape(t: Tour) -> dict:
             else None
         ),
         'countries': [c.name for c in t.countries.all()],
+        'areas': [area_ref(a) for a in t.areas.all()],
         'locationLabel': t.location_label or None,
         'highlights': t.highlights or [],
         'itinerary': t.itinerary or [],
@@ -414,6 +465,7 @@ class TourSchema(serializers.Serializer):
     reviewCount = serializers.IntegerField(min_value=0, required=False)
     destination = serializers.UUIDField(required=False, allow_null=True)
     countries = StringList(max_items=10, default=list)
+    areas = StringList(max_items=20, item_max=80)
     locationLabel = serializers.CharField(max_length=80, required=False, allow_blank=True, allow_null=True)
     highlights = StringList(default=list)
     itinerary = serializers.ListField(child=ItineraryDaySchema(), required=False, default=list, max_length=60)
@@ -453,6 +505,8 @@ TOUR_SORTS = {
 class TourQuery(PaginationQuery):
     category = serializers.CharField(max_length=80, required=False)
     country = serializers.CharField(max_length=80, required=False)
+    # A travel area slug; a group ("kenyan") includes every area beneath it.
+    area = serializers.CharField(max_length=80, required=False)
     region = serializers.ChoiceField(choices=Region.values, required=False)
     destination = serializers.CharField(max_length=120, required=False)
     featured = BooleanString()
@@ -472,6 +526,9 @@ def filter_tours(qs, q):
         qs = qs.filter(category_id__in=category.descendant_ids()) if category else qs.none()
     if q.get('country'):
         qs = qs.filter(Q(countries__name__iexact=q['country']) | Q(countries__slug__iexact=q['country']))
+    if q.get('area'):
+        area = TravelArea.objects.filter(slug=q['area'], status='published').first()
+        qs = qs.filter(areas__in=area.descendant_ids()) if area else qs.none()
     if q.get('region'):
         qs = qs.filter(countries__region=q['region'])
     if q.get('destination'):
@@ -544,6 +601,8 @@ def apply_tour(obj: Tour, data: dict, creating: bool) -> None:
 
     if 'countries' in data:
         obj.countries.set(resolve_countries(data['countries']))
+    if 'areas' in data:
+        obj.areas.set(resolve_areas(data['areas']))
     if 'gallery' in data:
         TourImage.objects.filter(tour=obj).delete()
         seen = set()
@@ -558,7 +617,11 @@ def apply_tour(obj: Tour, data: dict, creating: bool) -> None:
 def tour_queryset():
     return Tour.objects.select_related(
         'category', 'category__parent', 'hero_image', 'destination', 'destination__country', 'destination__hero_image'
-    ).prefetch_related('countries', Prefetch('tourimage_set', queryset=TourImage.objects.select_related('image')))
+    ).prefetch_related(
+        'countries',
+        Prefetch('areas', queryset=TravelArea.objects.select_related('parent')),
+        Prefetch('tourimage_set', queryset=TourImage.objects.select_related('image')),
+    )
 
 
 tours = Resource(

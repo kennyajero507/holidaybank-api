@@ -281,6 +281,110 @@ class ContentAdminTests(ApiTestCase):
         body = self.client.get('/api/blog?tag=europe').json()
         self.assertTrue(body['data'] and all('europe' in p['tags'] for p in body['data']))
 
+    def nav(self, **overrides):
+        item = {'id': 'a', 'label': 'Safaris', 'href': '/tours?category=safaris', 'visible': True, 'children': [
+            {'id': 'b', 'label': 'Kenyan Safaris', 'href': '/tours?category=kenyan-safaris',
+             'image': {'url': '/images/mara-cheetah.jpg', 'alt': ''}},
+            {'id': 'c', 'label': 'Hidden', 'href': '/about', 'visible': False},
+        ]}
+        item.update(overrides)
+        return [item, {'id': 'd', 'label': 'Contact', 'href': '/contact'}]
+
+    def test_navigation_starts_automatic(self):
+        self.assertEqual(self.client.get('/api/settings').json()['data']['navigation'], [])
+
+    def test_navigation_save_and_reset(self):
+        self.login()
+        res = self.client.patch('/api/admin/settings', {'navigation': self.nav()}, format='json')
+        self.assertEqual(res.status_code, 200, res.content)
+        nav = self.client.get('/api/settings').json()['data']['navigation']
+        self.assertEqual([i['label'] for i in nav], ['Safaris', 'Contact'])
+        self.assertEqual(nav[0]['children'][0]['image']['url'], '/images/mara-cheetah.jpg')
+        self.assertFalse(nav[0]['children'][1]['visible'])
+        self.assertTrue(nav[1]['visible'])  # defaults to shown
+        # Other sections are untouched by a navigation save.
+        self.assertEqual(self.client.get('/api/settings').json()['data']['contact']['email'], 'hello@holidaybankexpeditions.com')
+
+        res = self.client.patch('/api/admin/settings', {'navigation': []}, format='json')
+        self.assertEqual(res.json()['data']['navigation'], [])
+
+    def test_navigation_rejects_unsafe_links_and_blank_titles(self):
+        self.login()
+        for bad in ({'href': 'javascript:alert(1)'}, {'href': '//evil.example'}, {'label': ''}):
+            res = self.client.patch('/api/admin/settings', {'navigation': self.nav(**bad)}, format='json')
+            self.assertEqual(res.status_code, 422, bad)
+
+    def test_navigation_linked_items(self):
+        self.login()
+        linked = [
+            {'id': 'k', 'label': '', 'source': {'type': 'area', 'slug': 'kenyan'}},
+            {'id': 's', 'label': 'Our safaris', 'source': {'type': 'category', 'slug': 'safaris'}, 'showChildren': False},
+            {'id': 'f', 'source': {'type': 'destination', 'slug': 'france'}},
+        ]
+        res = self.client.patch('/api/admin/settings', {'navigation': linked}, format='json')
+        self.assertEqual(res.status_code, 200, res.content)
+        nav = res.json()['data']['navigation']
+        self.assertEqual(nav[0]['source'], {'type': 'area', 'slug': 'kenyan'})
+        self.assertEqual(nav[0]['label'], '')  # inherits the area's name when rendered
+        self.assertFalse(nav[1]['showChildren'])
+
+        res = self.client.patch('/api/admin/settings', {'navigation': [
+            {'id': 'x', 'source': {'type': 'category', 'slug': 'atlantis'}},
+        ]}, format='json')
+        self.assertEqual(res.status_code, 422)
+        self.assertIn('navigation.0.source.slug', res.json()['error']['details'])
+
+    def test_navigation_needs_settings_permission(self):
+        self.make_user('Author', 'author@test.example')
+        self.login('author@test.example')
+        res = self.client.patch('/api/admin/settings', {'navigation': self.nav()}, format='json')
+        self.assertEqual(res.status_code, 403)
+
+
+class TravelAreaTests(ApiTestCase):
+    def test_area_tree(self):
+        groups = self.client.get('/api/areas').json()['data']
+        self.assertEqual([g['name'] for g in groups], ['Kenyan', 'Europe', 'Africa', 'Asia & Middle East'])
+        kenyan = groups[0]
+        self.assertEqual([a['name'] for a in kenyan['children']],
+                         ['Diani', 'Watamu/Malindi', 'Maasai Mara', 'Amboseli', 'Tsavo'])
+        by_slug = {a['slug']: a for g in groups for a in g['children']}
+        self.assertEqual(by_slug['maasai-mara']['tourCount'], 5)
+        self.assertEqual(by_slug['watamu-malindi']['tourCount'], 0)
+        # Distinct tours: the group is not the sum of its areas when a tour is in two.
+        europe = groups[1]
+        self.assertEqual(europe['tourCount'], 6)
+        self.assertEqual(sum(a['tourCount'] for a in europe['children']), 7)
+
+    def test_kenyan_area_cards(self):
+        kenyan = self.client.get('/api/areas').json()['data'][0]
+        for area in kenyan['children']:
+            self.assertEqual(area['tag'], 'Locals / Kenya')
+            self.assertTrue(area['description'])
+            self.assertTrue(area['image']['url'].startswith('/images/'))
+            self.assertEqual(area['placeCount'], 1, area['slug'])
+        watamu = next(a for a in kenyan['children'] if a['slug'] == 'watamu-malindi')
+        self.assertEqual(watamu['tourCount'], 0)
+
+    def test_filter_by_area_and_group(self):
+        mara = self.client.get('/api/tours?area=maasai-mara&limit=50').json()
+        self.assertEqual(mara['meta']['total'], 5)
+        self.assertTrue(all(any(a['slug'] == 'maasai-mara' for a in t['areas']) for t in mara['data']))
+        kenyan = self.client.get('/api/tours?area=kenyan&limit=50').json()
+        self.assertEqual(kenyan['meta']['total'], 8)
+        self.assertEqual(self.client.get('/api/tours?area=atlantis').json()['meta']['total'], 0)
+        self.assertEqual(mara['data'][0]['areas'][0]['group']['slug'], 'kenyan')
+
+    def test_tour_areas_edit(self):
+        self.login()
+        tour = Tour.objects.get(title='Lake Naivasha Weekend')
+        res = self.client.patch(f'/api/admin/tours/{tour.id}', {'areas': ['diani', 'tsavo']}, format='json')
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(sorted(a['slug'] for a in res.json()['data']['areas']), ['diani', 'tsavo'])
+        res = self.client.patch(f'/api/admin/tours/{tour.id}', {'areas': ['atlantis']}, format='json')
+        self.assertEqual(res.status_code, 422)
+        self.assertIn('areas', res.json()['error']['details'])
+
 
 class EnquiryPipelineTests(ApiTestCase):
     def setUp(self):
